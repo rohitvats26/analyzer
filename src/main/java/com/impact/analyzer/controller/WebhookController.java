@@ -93,7 +93,7 @@ public class WebhookController {
 
             // Post analysis results as comment
             String comment = formatImpactComment(report);
-            String repoFullName = event.getPullRequest().getHead().getRepo().getFull_name();
+            String repoFullName = event.getPullRequest().getHead().getRepo().getFullName();
             gitHubService.postComment(repoFullName, event.getPullRequest().getNumber(), comment);
 
             // Add label based on risk level
@@ -113,7 +113,7 @@ public class WebhookController {
                 String errorComment = "🚨 **Impact Analysis Failed**\n\n" +
                         "```\n" + e.getMessage() + "\n```\n\n" +
                         "Please check the logs for more details.";
-                String repoFullName = event.getPullRequest().getHead().getRepo().getFull_name();
+                String repoFullName = event.getPullRequest().getHead().getRepo().getFullName();
                 gitHubService.postComment(repoFullName, event.getPullRequest().getNumber(), errorComment);
             } catch (Exception ex) {
                 log.error("Failed to post error comment", ex);

@@ -19,11 +19,11 @@ public class PullRequestEvent {
         }
         if (pullRequest != null && pullRequest.getHead() != null &&
                 pullRequest.getHead().getRepo() != null) {
-            return pullRequest.getHead().getRepo().getFull_name();
+            return pullRequest.getHead().getRepo().getFullName();
         }
         if (pullRequest != null && pullRequest.getBase() != null &&
                 pullRequest.getBase().getRepo() != null) {
-            return pullRequest.getBase().getRepo().getFull_name();
+            return pullRequest.getBase().getRepo().getFullName();
         }
         return null;
     }
