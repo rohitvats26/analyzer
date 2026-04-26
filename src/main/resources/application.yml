@@ -1,0 +1,26 @@
+server:
+  port: 8080
+
+github:
+  token: ${GITHUB_TOKEN}
+  webhook-secret: ${WEBHOOK_SECRET}
+
+copilot:
+  enabled: true
+  # GitHub Copilot uses the same GitHub token for authentication
+  # It works through GitHub's API and codespaces
+  api-endpoint: https://api.github.com
+  # Copilot Chat API (if available in your org)
+  chat-api: ${COPILOT_CHAT_API}
+
+impact:
+  analysis:
+    max-depth: 5
+    include-tests: true
+    auto-comment: true
+    use-copilot-chat: true
+
+logging:
+  level:
+    com.impact.analyzer: DEBUG
+    org.springframework.web: INFO
