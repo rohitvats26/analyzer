@@ -2,49 +2,25 @@ package com.impact.analyzer.model;
 
 import lombok.Data;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Data
 public class ImpactReport {
-    private String prNumber;
-    private String prTitle;
-    private ImpactReport.AnalysisSummary summary;
-    private List<ImpactReport.ImpactedService> impactedServices;
-    private List<ImpactReport.ImpactedAPI> impactedApis;
-    private List<ImpactReport.ImpactedScreen> impactedScreens;
-    private List<String> requiredTestCases;
-    private List<String> recommendations;
-    private double confidenceScore;
-    private String aiAnalysis;
+    private List<String> impactedServices = new ArrayList<>();
+    private List<String> impactedApis = new ArrayList<>();
+    private List<String> impactedUiComponents = new ArrayList<>();
+    private List<String> impactedDatabaseTables = new ArrayList<>();
+    private List<TestCase> requiredTestCases = new ArrayList<>();
+    private Map<String, Integer> riskScores = new HashMap<>();
 
     @Data
-    public static class AnalysisSummary {
-        private int totalChanges;
-        private int riskLevel; // 1-5
-        private String riskDescription;
-        private int estimatedTestingHours;
-    }
-
-    @Data
-    public static class ImpactedService {
+    public static class TestCase {
         private String name;
-        private String impactType; // DIRECT, INDIRECT
-        private String risk;
-        private List<String> reasons;
-    }
-
-    @Data
-    public static class ImpactedAPI {
-        private String endpoint;
-        private String method;
-        private String impactType;
-        private List<String> impactedMethods;
-    }
-
-    @Data
-    public static class ImpactedScreen {
-        private String name;
-        private String component;
-        private String impactReason;
+        private String type; // UNIT, INTEGRATION, E2E
+        private String priority; // HIGH, MEDIUM, LOW
+        private List<String> affectedComponents;
     }
 }

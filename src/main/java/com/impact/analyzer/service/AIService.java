@@ -1,3 +1,4 @@
+/*
 package com.impact.analyzer.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -292,4 +293,4 @@ public class AIService {
 
         return generateLocalAnalysis(changedFiles, impactedNodes);
     }
-}
+}*/

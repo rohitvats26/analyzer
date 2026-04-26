@@ -1,39 +1,40 @@
-server:
-  port: 8080
-
+# application.yml
 spring:
   application:
     name: impact-analyzer
-  jackson:
-    property-naming-strategy: SNAKE_CASE
-
+  neo4j:
+    uri: ${NEO4J_URI:bolt://localhost:7687}
+    authentication:
+      username: ${NEO4J_USERNAME:neo4j}
+      password: ${NEO4J_PASSWORD:password}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
 
 github:
-  token: ${GITHUB_TOKEN:your-github-token}  # Optional: Set your GitHub token for higher API limits
-  webhook-secret: ${WEBHOOK_SECRET:your-webhook-secret}
+  token: ${GITHUB_TOKEN:}
+  webhook-secret: ${GITHUB_WEBHOOK_SECRET:}
 
-# Copilot/AI Configuration
-copilot:
-  use:
-    local: true  # Use local analysis (no API calls)
-  # Uncomment to try Copilot API (requires GitHub Copilot license)
-  # enabled: false
+otel:
+  service:
+    name: impact-analyzer
+  exporter:
+    endpoint: ${OTEL_EXPORTER_ENDPOINT:http://localhost:4318/v1/traces}
 
-openai:
-  api:
-    key: ${OPENAI_API_KEY:your-openai-key}  # Optional: Set your OpenAI API key for AI analysis
-  use:
-    fallback: true
+codebase:
+  path: ${CODEBASE_PATH:/app/src}
+
+server:
+  port: 8080
 
 logging:
   level:
-    com.impactanalyzer: DEBUG
-    org.springframework.web: INFO
-  pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    com.impact.analyzer: INFO
+    org.springframework.web: WARN
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus

@@ -3,11 +3,15 @@ package com.impact.analyzer.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.impact.analyzer.model.ChangedFile;
+import com.impact.analyzer.model.ImpactReport;
 import com.impact.analyzer.model.PullRequestEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.kohsuke.github.*;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -17,165 +21,97 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @Slf4j
 public class GitHubService {
 
-    @Value("${github.token:}")
+    @Value("${github.token}")
     private String githubToken;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private GitHub github;
 
-
-    public List<ChangedFile> getChangedFiles(PullRequestEvent event) throws Exception {
-        List<ChangedFile> changedFiles = new ArrayList<>();
-
-        String repoFullName = event.getRepository().getFullName();
-        int prNumber = event.getPullRequest().getNumber();
-
-        // Use GitHub REST API directly
-        String apiUrl = String.format("https://api.github.com/repos/%s/pulls/%d/files",
-                repoFullName, prNumber);
-
-        HttpURLConnection conn = (HttpURLConnection) new URL(apiUrl).openConnection();
-        conn.setRequestMethod("GET");
-        conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
-        conn.setRequestProperty("User-Agent", "PR-Impact-Analyzer");
-
-        if (githubToken != null && !githubToken.isEmpty()) {
-            conn.setRequestProperty("Authorization", "token " + githubToken);
-        }
-
-        int responseCode = conn.getResponseCode();
-        if (responseCode == 200) {
-            StringBuilder response = new StringBuilder();
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream()))) {
-                String line;
-                while ((line = br.readLine()) != null) {
-                    response.append(line);
-                }
+    public void postPRComment(String repoName, int prNumber, ImpactReport report) {
+        try {
+            if (github == null) {
+                github = new GitHubBuilder().withOAuthToken(githubToken).build();
             }
 
-            JsonNode files = objectMapper.readTree(response.toString());
-            for (JsonNode file : files) {
-                ChangedFile changedFile = new ChangedFile();
-                changedFile.setFilename(file.get("filename").asText());
-                changedFile.setStatus(file.get("status").asText());
-                changedFile.setAdditions(file.get("additions").asInt());
-                changedFile.setDeletions(file.get("deletions").asInt());
+            GHRepository repo = github.getRepository(repoName);
+            GHPullRequest pr = repo.getPullRequest(prNumber);
 
-                if (file.has("patch")) {
-                    changedFile.setPatch(file.get("patch").asText());
-                }
-                if (file.has("blob_url")) {
-                    changedFile.setBlobUrl(file.get("blob_url").asText());
-                }
-                if (file.has("raw_url")) {
-                    changedFile.setRawUrl(file.get("raw_url").asText());
-                }
+            String comment = formatImpactReport(report);
+            pr.comment(comment);
 
-                changedFiles.add(changedFile);
-            }
-            log.info("Retrieved {} changed files from PR #{}", changedFiles.size(), prNumber);
-        } else {
-            // Read error response
-            StringBuilder errorResponse = new StringBuilder();
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(conn.getErrorStream()))) {
-                String line;
-                while ((line = br.readLine()) != null) {
-                    errorResponse.append(line);
-                }
-            }
-            log.error("GitHub API returned {} for PR #{}/files. Error: {}",
-                    responseCode, prNumber, errorResponse.toString());
-            throw new RuntimeException("GitHub API error: " + responseCode);
-        }
+            log.info("Posted impact analysis comment to PR #{}", prNumber);
 
-        conn.disconnect();
-        return changedFiles;
-    }
-
-    private String getStatusType(String status) {
-        if (status == null) return "modified";
-        switch (status.toLowerCase()) {
-            case "added": return "added";
-            case "removed": return "removed";
-            case "renamed": return "renamed";
-            case "copied": return "copied";
-            case "changed": return "modified";
-            default: return "modified";
+        } catch (IOException e) {
+            log.error("Failed to post PR comment", e);
         }
     }
 
-    public void postComment(String repo, int prNumber, String comment) throws Exception {
-        String apiUrl = String.format("https://api.github.com/repos/%s/issues/%d/comments",
-                repo, prNumber);
+    private String formatImpactReport(ImpactReport report) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## 🚀 AI-Powered Impact Analysis Report\n\n");
 
-        HttpURLConnection conn = (HttpURLConnection) new URL(apiUrl).openConnection();
-        conn.setRequestMethod("POST");
-        conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
-        conn.setRequestProperty("Content-Type", "application/json");
-        conn.setRequestProperty("User-Agent", "PR-Impact-Analyzer");
+        sb.append("### 📊 Impact Summary\n");
+        sb.append("| Type | Count |\n");
+        sb.append("|------|-------|\n");
+        sb.append("| Services | ").append(report.getImpactedServices().size()).append(" |\n");
+        sb.append("| APIs | ").append(report.getImpactedApis().size()).append(" |\n");
+        sb.append("| UI Components | ").append(report.getImpactedUiComponents().size()).append(" |\n");
+        sb.append("| Database Tables | ").append(report.getImpactedDatabaseTables().size()).append(" |\n");
+        sb.append("\n");
 
-        if (githubToken != null && !githubToken.isEmpty()) {
-            conn.setRequestProperty("Authorization", "token " + githubToken);
+        if (!report.getImpactedServices().isEmpty()) {
+            sb.append("### 🔧 Impacted Services\n");
+            for (String service : report.getImpactedServices()) {
+                sb.append("- `").append(service).append("`\n");
+            }
+            sb.append("\n");
         }
 
-        conn.setDoOutput(true);
-
-        String jsonBody = String.format("{\"body\": %s}",
-                objectMapper.writeValueAsString(comment));
-
-        try (OutputStream os = conn.getOutputStream()) {
-            os.write(jsonBody.getBytes());
-            os.flush();
+        if (!report.getImpactedApis().isEmpty()) {
+            sb.append("### 🌐 Impacted APIs\n");
+            for (String api : report.getImpactedApis()) {
+                sb.append("- `").append(api).append("`\n");
+            }
+            sb.append("\n");
         }
 
-        int responseCode = conn.getResponseCode();
-        if (responseCode != 201) {
-            log.error("Failed to post comment: HTTP {}", responseCode);
-            throw new RuntimeException("Failed to post comment: " + responseCode);
+        if (!report.getImpactedUiComponents().isEmpty()) {
+            sb.append("### 🎨 Impacted UI Components\n");
+            for (String ui : report.getImpactedUiComponents()) {
+                sb.append("- `").append(ui).append("`\n");
+            }
+            sb.append("\n");
+        }
+
+        sb.append("### 🧪 Required Test Cases\n");
+        for (ImpactReport.TestCase test : report.getRequiredTestCases()) {
+            sb.append("- **").append(test.getName()).append("** (")
+                    .append(test.getType()).append(", Priority: ").append(test.getPriority())
+                    .append(")\n");
+        }
+        sb.append("\n");
+
+        sb.append("### ⚠️ Risk Assessment\n");
+        sb.append("| Risk Factor | Score |\n");
+        sb.append("|-------------|-------|\n");
+        for (Map.Entry<String, Integer> risk : report.getRiskScores().entrySet()) {
+            sb.append("| ").append(risk.getKey()).append(" | ").append(risk.getValue()).append("/10 |\n");
+        }
+
+        sb.append("\n**💡 Recommendation:** ");
+        if (report.getRiskScores().getOrDefault("BREAKING_CHANGE_RISK", 0) > 7) {
+            sb.append("Requires comprehensive testing and code review before merging.\n");
+        } else if (report.getRiskScores().getOrDefault("BREAKING_CHANGE_RISK", 0) > 3) {
+            sb.append("Recommended to run integration tests before merging.\n");
         } else {
-            log.info("Posted comment to PR #{}", prNumber);
+            sb.append("Low risk change, unit tests sufficient.\n");
         }
 
-        conn.disconnect();
-    }
-
-    public void addLabel(String repo, int prNumber, String label) throws Exception {
-        String apiUrl = String.format("https://api.github.com/repos/%s/issues/%d/labels",
-                repo, prNumber);
-
-        HttpURLConnection conn = (HttpURLConnection) new URL(apiUrl).openConnection();
-        conn.setRequestMethod("POST");
-        conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
-        conn.setRequestProperty("Content-Type", "application/json");
-        conn.setRequestProperty("User-Agent", "PR-Impact-Analyzer");
-
-        if (githubToken != null && !githubToken.isEmpty()) {
-            conn.setRequestProperty("Authorization", "token " + githubToken);
-        }
-
-        conn.setDoOutput(true);
-
-        String jsonBody = String.format("{\"labels\": [\"%s\"]}", label);
-
-        try (OutputStream os = conn.getOutputStream()) {
-            os.write(jsonBody.getBytes());
-            os.flush();
-        }
-
-        int responseCode = conn.getResponseCode();
-        if (responseCode != 200) {
-            log.error("Failed to add label: HTTP {}", responseCode);
-            throw new RuntimeException("Failed to add label: " + responseCode);
-        } else {
-            log.info("Added label '{}' to PR #{}", label, prNumber);
-        }
-
-        conn.disconnect();
+        return sb.toString();
     }
 }
