@@ -2,8 +2,8 @@ server:
   port: 8080
 
 github:
-  token: ${GITHUB_TOKEN}
-  webhook-secret: ${WEBHOOK_SECRET}
+  token: ${GITHUB_TOKEN:your-github-token}
+  webhook-secret: ${WEBHOOK_SECRET:your-webhook-secret}
 
 copilot:
   enabled: true
@@ -11,7 +11,7 @@ copilot:
   # It works through GitHub's API and codespaces
   api-endpoint: https://api.github.com
   # Copilot Chat API (if available in your org)
-  chat-api: ${COPILOT_CHAT_API}
+  chat-api: ${COPILOT_CHAT_API:https://api.githubcopilot.com}
 
 impact:
   analysis:
