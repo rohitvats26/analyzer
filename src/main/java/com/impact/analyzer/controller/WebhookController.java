@@ -1,6 +1,7 @@
 package com.impact.analyzer.controller;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.impact.analyzer.model.DependencyGraph;
@@ -36,7 +37,7 @@ public class WebhookController {
     @Value("${analyzer.workspace:/tmp/pr-analyzer}")
     private String workspacePath;
 
-    private final Gson gson = new Gson();
+    private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
 
 
     @PostMapping("/github")
