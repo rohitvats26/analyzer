@@ -2,6 +2,7 @@ package com.impact.analyzer.controller;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.impact.analyzer.model.DependencyGraph;
 import com.impact.analyzer.model.ImpactReport;
 import com.impact.analyzer.service.DependencyAnalyzer;
@@ -35,6 +36,9 @@ public class WebhookController {
     @Value("${analyzer.workspace:/tmp/pr-analyzer}")
     private String workspacePath;
 
+    private final Gson gson = new Gson();
+
+
     @PostMapping("/github")
     public String handlePRWebhook(@RequestBody String payload,
                                   @RequestHeader("X-GitHub-Event") String eventType) {
@@ -44,8 +48,7 @@ public class WebhookController {
         }
 
         try {
-            Gson gson = new Gson();
-            JsonObject json = gson.fromJson(payload, JsonObject.class);
+            JsonObject json = JsonParser.parseString(payload).getAsJsonObject();
 
             String action = json.get("action").getAsString();
             if (!"opened".equals(action) && !"synchronize".equals(action)) {
