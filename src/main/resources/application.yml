@@ -4,11 +4,13 @@ server:
 spring:
   application:
     name: impact-analyzer
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+
 
 github:
   token: ${GITHUB_TOKEN:your-github-token}  # Optional: Set your GitHub token for higher API limits
   webhook-secret: ${WEBHOOK_SECRET:your-webhook-secret}
-
 
 openai:
   api:
