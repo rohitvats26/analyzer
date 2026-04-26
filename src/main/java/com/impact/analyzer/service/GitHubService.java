@@ -31,7 +31,7 @@ public class GitHubService {
     public List<ChangedFile> getChangedFiles(PullRequestEvent event) throws Exception {
         List<ChangedFile> changedFiles = new ArrayList<>();
 
-        String repoFullName = event.getRepository();
+        String repoFullName = event.getRepository().getFullName();
         int prNumber = event.getPullRequest().getNumber();
 
         // Use GitHub REST API directly
