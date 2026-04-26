@@ -7,24 +7,44 @@ import java.util.List;
 @Data
 public class ImpactReport {
     private String prNumber;
-    private String summary;
-    private List<ImpactedComponent> impactedComponents;
-    private List<String> affectedAPIs;
-    private List<String> affectedUIScreens;
-    private List<String> recommendedTests;
-    private RiskLevel riskLevel;
-    private List<String> affectedServices;
-    
+    private String prTitle;
+    private ImpactReport.AnalysisSummary summary;
+    private List<ImpactReport.ImpactedService> impactedServices;
+    private List<ImpactReport.ImpactedAPI> impactedApis;
+    private List<ImpactReport.ImpactedScreen> impactedScreens;
+    private List<String> requiredTestCases;
+    private List<String> recommendations;
+    private double confidenceScore;
+    private String aiAnalysis;
+
     @Data
-    public static class ImpactedComponent {
-        private String name;
-        private String type; // SERVICE, API, UI, DB
-        private String impactLevel; // HIGH, MEDIUM, LOW
-        private String reason;
-        private List<String> dependents;
+    public static class AnalysisSummary {
+        private int totalChanges;
+        private int riskLevel; // 1-5
+        private String riskDescription;
+        private int estimatedTestingHours;
     }
-    
-    public enum RiskLevel {
-        HIGH, MEDIUM, LOW
+
+    @Data
+    public static class ImpactedService {
+        private String name;
+        private String impactType; // DIRECT, INDIRECT
+        private String risk;
+        private List<String> reasons;
+    }
+
+    @Data
+    public static class ImpactedAPI {
+        private String endpoint;
+        private String method;
+        private String impactType;
+        private List<String> impactedMethods;
+    }
+
+    @Data
+    public static class ImpactedScreen {
+        private String name;
+        private String component;
+        private String impactReason;
     }
 }

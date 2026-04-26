@@ -1,9 +1,9 @@
+/*
 package com.impact.analyzer.service;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import com.impact.analyzer.model.DependencyGraph;
 import com.impact.analyzer.model.PullRequestEvent;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
@@ -414,4 +414,4 @@ public class CopilotService {
         if (filename.endsWith(".sql")) return "SQL";
         return "Other";
     }
-}
+}*/

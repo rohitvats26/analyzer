@@ -1,103 +1,165 @@
 package com.impact.analyzer.controller;
 
+import com.impact.analyzer.model.ChangedFile;
+import com.impact.analyzer.model.ImpactReport;
 import com.impact.analyzer.model.PullRequestEvent;
+import com.impact.analyzer.service.GitHubService;
 import com.impact.analyzer.service.ImpactAnalysisService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
-import java.nio.charset.StandardCharsets;
-import java.security.InvalidKeyException;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
+import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/webhook")
-@RequiredArgsConstructor
 @Slf4j
 public class WebhookController {
-    
-    private final ImpactAnalysisService impactAnalysisService;
-    private final String webhookSecret = System.getenv("WEBHOOK_SECRET");
-    
+
+    @Autowired
+    private GitHubService gitHubService;
+
+    @Autowired
+    private ImpactAnalysisService impactAnalysisService;
+
     @PostMapping("/github")
     public ResponseEntity<String> handleGitHubWebhook(
-            @RequestBody String payload,
             @RequestHeader("X-GitHub-Event") String eventType,
-            @RequestHeader("X-Hub-Signature-256") String signature) {
-        
-        log.info("📨 Received GitHub event: {}", eventType);
-        
-        // Verify webhook signature
-        if (!verifySignature(payload, signature)) {
-            log.error("❌ Invalid webhook signature");
-            return ResponseEntity.status(403).body("Invalid signature");
+            @RequestBody PullRequestEvent payload) {
+
+        log.info("Received GitHub event: {}", eventType);
+
+        // Only process pull request events
+        if (!"pull_request".equals(eventType)) {
+            return ResponseEntity.ok("Ignored non-PR event");
         }
-        
-        // Handle pull request events
-        if ("pull_request".equals(eventType)) {
-            return handlePullRequestEvent(payload);
+
+        // Only process opened, synchronize (code push), and reopened events
+        String action = payload.getAction();
+        if (!List.of("opened", "synchronize", "reopened").contains(action)) {
+            log.info("Ignoring PR action: {}", action);
+            return ResponseEntity.ok("Ignored action: " + action);
         }
-        
-        return ResponseEntity.ok("Event received");
-    }
-    
-    private ResponseEntity<String> handlePullRequestEvent(String payload) {
+
         try {
-            // Parse the event
-            PullRequestEvent event = parsePullRequestEvent(payload);
-            
-            // Check if this is a PR opened or synchronized event
-            if (event.getAction().equals("opened") || 
-                event.getAction().equals("synchronize") ||
-                event.getAction().equals("reopened")) {
-                
-                log.info("🔍 Analyzing PR #{}: {}", 
-                    event.getNumber(), 
-                    event.getPullRequest().getTitle());
-                
-                // Trigger async analysis
-                impactAnalysisService.analyzePullRequest(event);
-                
-                return ResponseEntity.ok("Analysis started for PR #" + event.getNumber());
-            }
-            
-            return ResponseEntity.ok("Event type not processed: " + event.getAction());
-            
+            // Process the PR asynchronously to avoid timeout
+            processPullRequestAsync(payload);
+            return ResponseEntity.accepted().body("PR analysis started");
+
         } catch (Exception e) {
-            log.error("Error processing PR event", e);
-            return ResponseEntity.status(500).body("Error processing event");
+            log.error("Failed to process webhook", e);
+            return ResponseEntity.internalServerError().body("Error: " + e.getMessage());
         }
     }
-    
-    private boolean verifySignature(String payload, String signatureHeader) {
-        if (webhookSecret == null || signatureHeader == null) {
-            return true; // Skip verification if secret not configured
-        }
-        
+
+    private void processPullRequestAsync(PullRequestEvent event) {
         try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            SecretKeySpec secretKeySpec = new SecretKeySpec(
-                webhookSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
-            mac.init(secretKeySpec);
-            
-            byte[] hmacBytes = mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
-            String calculatedSignature = "sha256=" + HexFormat.of().formatHex(hmacBytes);
-            
-            return calculatedSignature.equals(signatureHeader);
-        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-            log.error("Error verifying signature", e);
-            return false;
+            // Fetch changed files
+            List<ChangedFile> changedFiles = gitHubService.getChangedFiles(event);
+
+            log.info("Processing PR #{} with {} changed files",
+                    event.getPullRequest().getNumber(), changedFiles.size());
+
+            // Run impact analysis
+            ImpactReport report = impactAnalysisService.analyzePullRequest(event, changedFiles);
+
+            // Post analysis results as comment
+            String comment = formatImpactComment(report);
+            String repoFullName = event.getPullRequest().getHead().getRepo().getFull_name();
+            gitHubService.postComment(repoFullName, event.getPullRequest().getNumber(), comment);
+
+            // Add label based on risk level
+            if (report.getSummary().getRiskLevel() >= 4) {
+                gitHubService.addLabel(repoFullName, event.getPullRequest().getNumber(), "high-risk");
+            } else if (report.getSummary().getRiskLevel() >= 3) {
+                gitHubService.addLabel(repoFullName, event.getPullRequest().getNumber(), "needs-review");
+            } else {
+                gitHubService.addLabel(repoFullName, event.getPullRequest().getNumber(), "low-risk");
+            }
+
+            log.info("Completed analysis for PR #{}", event.getPullRequest().getNumber());
+
+        } catch (Exception e) {
+            log.error("Failed to process PR analysis", e);
+            try {
+                String errorComment = "🚨 **Impact Analysis Failed**\n\n" +
+                        "```\n" + e.getMessage() + "\n```\n\n" +
+                        "Please check the logs for more details.";
+                String repoFullName = event.getPullRequest().getHead().getRepo().getFull_name();
+                gitHubService.postComment(repoFullName, event.getPullRequest().getNumber(), errorComment);
+            } catch (Exception ex) {
+                log.error("Failed to post error comment", ex);
+            }
         }
     }
-    
-    private PullRequestEvent parsePullRequestEvent(String payload) {
-        // Parse GitHub webhook payload
-        // This is a simplified version - you'd use a proper JSON parser
-        com.google.gson.Gson gson = new com.google.gson.Gson();
-        return gson.fromJson(payload, PullRequestEvent.class);
+
+    private String formatImpactComment(ImpactReport report) {
+        StringBuilder comment = new StringBuilder();
+
+        comment.append("## 🤖 AI-Powered Impact Analysis\n\n");
+
+        // Risk summary
+        int riskLevel = report.getSummary().getRiskLevel();
+        String riskEmoji = riskLevel >= 4 ? "🔴" : (riskLevel >= 3 ? "🟡" : "🟢");
+        comment.append(String.format("### %s Risk Level: %d/5\n", riskEmoji, riskLevel));
+        comment.append(report.getSummary().getRiskDescription()).append("\n\n");
+
+        // Impacted Services
+        if (!report.getImpactedServices().isEmpty()) {
+            comment.append("### 🎯 Impacted Services\n");
+            for (var service : report.getImpactedServices()) {
+                String riskIcon = "HIGH".equals(service.getRisk()) ? "🔴" :
+                        ("MEDIUM".equals(service.getRisk()) ? "🟡" : "🟢");
+                comment.append(String.format("- **%s** %s [%s impact]\n",
+                        service.getName(), riskIcon, service.getImpactType()));
+                comment.append("  - Reasons: ").append(String.join(", ", service.getReasons())).append("\n");
+            }
+            comment.append("\n");
+        }
+
+        // Impacted APIs
+        if (!report.getImpactedApis().isEmpty()) {
+            comment.append("### 🔌 Impacted APIs\n");
+            for (var api : report.getImpactedApis()) {
+                comment.append(String.format("- `%s %s` [%s impact]\n",
+                        api.getMethod(), api.getEndpoint(), api.getImpactType()));
+                if (!api.getImpactedMethods().isEmpty()) {
+                    comment.append("  - Affected methods: ").append(String.join(", ", api.getImpactedMethods())).append("\n");
+                }
+            }
+            comment.append("\n");
+        }
+
+        // Test Cases
+        comment.append("### 🧪 Required Test Cases\n");
+        for (String testCase : report.getRequiredTestCases()) {
+            comment.append("- ").append(testCase).append("\n");
+        }
+        comment.append("\n");
+
+        // Recommendations
+        comment.append("### 💡 Recommendations\n");
+        for (String recommendation : report.getRecommendations()) {
+            comment.append("- ").append(recommendation).append("\n");
+        }
+        comment.append("\n");
+
+        // Metadata
+        comment.append("---\n");
+        comment.append(String.format("**Confidence Score:** %.0f%% | ", report.getConfidenceScore() * 100));
+        comment.append(String.format("**Estimated Testing Time:** %d hours\n", report.getSummary().getEstimatedTestingHours()));
+        comment.append("*Powered by AI & Dependency Graph Analysis*\n");
+
+        return comment.toString();
+    }
+
+    @GetMapping("/health")
+    public ResponseEntity<Map<String, String>> health() {
+        return ResponseEntity.ok(Map.of(
+                "status", "healthy",
+                "service", "PR Impact Analyzer"
+        ));
     }
 }
