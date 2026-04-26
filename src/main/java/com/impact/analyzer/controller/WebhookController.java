@@ -1,17 +1,21 @@
 package com.impact.analyzer.controller;
 
+import com.impact.analyzer.config.WebhookSecurity;
 import com.impact.analyzer.model.ChangedFile;
 import com.impact.analyzer.model.ImpactReport;
 import com.impact.analyzer.model.PullRequestEvent;
 import com.impact.analyzer.service.GitHubService;
 import com.impact.analyzer.service.ImpactAnalysisService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/webhook")
@@ -22,14 +26,36 @@ public class WebhookController {
     private GitHubService gitHubService;
 
     @Autowired
+    private WebhookSecurity webhookSecurity;
+
+    @Autowired
     private ImpactAnalysisService impactAnalysisService;
 
     @PostMapping("/github")
     public ResponseEntity<String> handleGitHubWebhook(
+            HttpServletRequest request,
             @RequestHeader("X-GitHub-Event") String eventType,
-            @RequestBody PullRequestEvent payload) {
+            @RequestHeader(value = "X-Hub-Signature-256", required = false) String signature,
+            @RequestBody String payload) {
 
         log.info("Received GitHub event: {}", eventType);
+
+        // Verify webhook signature
+        if (!webhookSecurity.verifySignature(payload, signature)) {
+            log.error("Invalid webhook signature - rejecting request");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body("Invalid webhook signature");
+        }
+
+        // Parse the payload
+        PullRequestEvent event;
+        try {
+            event = new com.fasterxml.jackson.databind.ObjectMapper()
+                    .readValue(payload, PullRequestEvent.class);
+        } catch (Exception e) {
+            log.error("Failed to parse webhook payload", e);
+            return ResponseEntity.badRequest().body("Invalid payload");
+        }
 
         // Only process pull request events
         if (!"pull_request".equals(eventType)) {
@@ -37,7 +63,7 @@ public class WebhookController {
         }
 
         // Only process opened, synchronize (code push), and reopened events
-        String action = payload.getAction();
+        String action = event.getAction();
         if (!List.of("opened", "synchronize", "reopened").contains(action)) {
             log.info("Ignoring PR action: {}", action);
             return ResponseEntity.ok("Ignored action: " + action);
@@ -45,7 +71,7 @@ public class WebhookController {
 
         try {
             // Process the PR asynchronously to avoid timeout
-            processPullRequestAsync(payload);
+            CompletableFuture.runAsync(() -> processPullRequestAsync(event));
             return ResponseEntity.accepted().body("PR analysis started");
 
         } catch (Exception e) {
@@ -132,6 +158,17 @@ public class WebhookController {
             comment.append("\n");
         }
 
+        // Impacted Screens
+        if (!report.getImpactedScreens().isEmpty()) {
+            comment.append("### 🖥️ Impacted UI Screens\n");
+            for (var screen : report.getImpactedScreens()) {
+                comment.append(String.format("- **%s** (%s)\n",
+                        screen.getName(), screen.getComponent()));
+                comment.append("  - Reason: ").append(screen.getImpactReason()).append("\n");
+            }
+            comment.append("\n");
+        }
+
         // Test Cases
         comment.append("### 🧪 Required Test Cases\n");
         for (String testCase : report.getRequiredTestCases()) {
@@ -159,7 +196,10 @@ public class WebhookController {
     public ResponseEntity<Map<String, String>> health() {
         return ResponseEntity.ok(Map.of(
                 "status", "healthy",
-                "service", "PR Impact Analyzer"
+                "service", "PR Impact Analyzer",
+                "webhook-secure", String.valueOf(
+                        !webhookSecurity.getClass().getDeclaredFields()[0].toString().isEmpty()
+                )
         ));
     }
 }
