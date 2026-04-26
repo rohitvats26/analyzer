@@ -4,69 +4,31 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
-import com.github.javaparser.ast.body.MethodDeclaration;
-import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.impact.analyzer.model.DependencyNode;
 import lombok.extern.slf4j.Slf4j;
-import org.jgrapht.Graph;
-import org.jgrapht.graph.DefaultDirectedGraph;
-import org.jgrapht.graph.DefaultEdge;
 import org.springframework.stereotype.Service;
 
-import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Service
 @Slf4j
 public class DependencyGraphService {
 
-    private Graph<String, DefaultEdge> dependencyGraph;
     private Map<String, DependencyNode> nodeDetails;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public DependencyGraphService() {
-        this.dependencyGraph = new DefaultDirectedGraph<>(DefaultEdge.class);
         this.nodeDetails = new HashMap<>();
-        loadOrBuildGraph();
+        buildDefaultGraph();
     }
 
-    private void loadOrBuildGraph() {
-        File graphFile = new File("dependency-graph.json");
-        if (graphFile.exists()) {
-            try {
-                DependencyNode[] nodes = objectMapper.readValue(graphFile, DependencyNode[].class);
-                for (DependencyNode node : nodes) {
-                    addNode(node);
-                }
-                log.info("Loaded dependency graph with {} nodes", nodes.length);
-            } catch (Exception e) {
-                log.error("Failed to load graph, building new one", e);
-                buildGraphFromCode();
-            }
-        } else {
-            buildGraphFromCode();
-        }
-    }
+    private void buildDefaultGraph() {
+        log.info("Building default dependency graph...");
 
-    private void buildGraphFromCode() {
-        log.info("Building dependency graph from source code...");
-
-        // Add sample services for demonstration
-        addSampleServices();
-
-        // In production, this would parse the actual codebase
-        // parseJavaFiles("src/main/java");
-
-        saveGraph();
-    }
-
-    private void addSampleServices() {
         // User Service
         DependencyNode userService = new DependencyNode();
         userService.setId("user-service");
@@ -85,34 +47,62 @@ public class DependencyGraphService {
         orderService.setDependencies(Arrays.asList("order-repository", "payment-service", "inventory-service"));
         orderService.setDependents(Arrays.asList("shipping-service"));
 
+        // Auth Service
+        DependencyNode authService = new DependencyNode();
+        authService.setId("auth-service");
+        authService.setType("SERVICE");
+        authService.setName("AuthService");
+        authService.setPath("com.example.service.AuthService");
+        authService.setDependencies(Arrays.asList("user-service"));
+        authService.setDependents(Arrays.asList("api-gateway"));
+
+        // Payment Service
+        DependencyNode paymentService = new DependencyNode();
+        paymentService.setId("payment-service");
+        paymentService.setType("SERVICE");
+        paymentService.setName("PaymentService");
+        paymentService.setPath("com.example.service.PaymentService");
+        paymentService.setDependencies(Arrays.asList("payment-gateway"));
+        paymentService.setDependents(Arrays.asList("order-service"));
+
         // API Endpoints
         DependencyNode userAPI = new DependencyNode();
         userAPI.setId("api-user");
         userAPI.setType("API");
         userAPI.setName("/api/users");
         userAPI.setPath("POST /api/users");
-        userAPI.setDependencies(Arrays.asList("user-service", "validation-service"));
+        userAPI.setDependencies(Arrays.asList("user-service"));
+        userAPI.setDependents(Arrays.asList("ui-user-profile"));
 
         DependencyNode orderAPI = new DependencyNode();
         orderAPI.setId("api-order");
         orderAPI.setType("API");
         orderAPI.setName("/api/orders");
         orderAPI.setPath("POST /api/orders");
-        orderAPI.setDependencies(Arrays.asList("order-service", "payment-service"));
+        orderAPI.setDependencies(Arrays.asList("order-service"));
+        orderAPI.setDependents(Arrays.asList("ui-order-list"));
+
+        DependencyNode authAPI = new DependencyNode();
+        authAPI.setId("api-auth");
+        authAPI.setType("API");
+        authAPI.setName("/api/auth");
+        authAPI.setPath("POST /api/auth/login");
+        authAPI.setDependencies(Arrays.asList("auth-service"));
+        authAPI.setDependents(Arrays.asList("ui-login"));
 
         // Database tables
         DependencyNode userDB = new DependencyNode();
         userDB.setId("db-users");
         userDB.setType("DB");
         userDB.setName("users_table");
-        userDB.setDependencies(Arrays.asList());
+        userDB.setDependencies(new ArrayList<>());
         userDB.setDependents(Arrays.asList("user-service"));
 
         DependencyNode orderDB = new DependencyNode();
         orderDB.setId("db-orders");
         orderDB.setType("DB");
         orderDB.setName("orders_table");
-        orderDB.setDependencies(Arrays.asList());
+        orderDB.setDependencies(new ArrayList<>());
         orderDB.setDependents(Arrays.asList("order-service"));
 
         // UI Components
@@ -120,34 +110,45 @@ public class DependencyGraphService {
         userUI.setId("ui-user-profile");
         userUI.setType("UI_COMPONENT");
         userUI.setName("UserProfileScreen");
-        userUI.setDependencies(Arrays.asList("user-api"));
+        userUI.setPath("src/ui/screens/UserProfileScreen.js");
+        userUI.setDependencies(Arrays.asList("api-user"));
+        userUI.setDependents(new ArrayList<>());
 
         DependencyNode orderUI = new DependencyNode();
         orderUI.setId("ui-order-list");
         orderUI.setType("UI_COMPONENT");
         orderUI.setName("OrderListScreen");
-        orderUI.setDependencies(Arrays.asList("order-api"));
+        orderUI.setPath("src/ui/screens/OrderListScreen.js");
+        orderUI.setDependencies(Arrays.asList("api-order"));
+        orderUI.setDependents(new ArrayList<>());
 
+        DependencyNode loginUI = new DependencyNode();
+        loginUI.setId("ui-login");
+        loginUI.setType("UI_COMPONENT");
+        loginUI.setName("LoginScreen");
+        loginUI.setPath("src/ui/screens/LoginScreen.js");
+        loginUI.setDependencies(Arrays.asList("api-auth"));
+        loginUI.setDependents(new ArrayList<>());
+
+        // Add all nodes
         addNode(userService);
         addNode(orderService);
+        addNode(authService);
+        addNode(paymentService);
         addNode(userAPI);
         addNode(orderAPI);
+        addNode(authAPI);
         addNode(userDB);
         addNode(orderDB);
         addNode(userUI);
         addNode(orderUI);
+        addNode(loginUI);
+
+        log.info("Built dependency graph with {} nodes", nodeDetails.size());
     }
 
     private void addNode(DependencyNode node) {
         nodeDetails.put(node.getId(), node);
-        dependencyGraph.addVertex(node.getId());
-
-        for (String dep : node.getDependencies()) {
-            if (!dependencyGraph.containsVertex(dep)) {
-                dependencyGraph.addVertex(dep);
-            }
-            dependencyGraph.addEdge(node.getId(), dep);
-        }
     }
 
     private void parseJavaFiles(String directory) throws Exception {
@@ -209,9 +210,9 @@ public class DependencyGraphService {
         Set<String> impacted = new HashSet<>();
 
         // Find which node corresponds to this file
-        String startNode = findNodeByPath(changedFile);
+        String startNode = findNodeByFileName(changedFile);
         if (startNode == null) {
-            log.warn("No node found for file: {}", changedFile);
+            log.debug("No node found for file: {}", changedFile);
             return impacted;
         }
 
@@ -225,26 +226,52 @@ public class DependencyGraphService {
 
         while (!queue.isEmpty()) {
             String current = queue.poll();
+            DependencyNode currentNode = nodeDetails.get(current);
 
-            // Find all nodes that depend on current node
-            for (DependencyNode node : nodeDetails.values()) {
-                if (node.getDependencies().contains(current) && !visited.contains(node.getId())) {
-                    visited.add(node.getId());
-                    impacted.add(node.getId());
-                    queue.add(node.getId());
+            if (currentNode != null && currentNode.getDependents() != null) {
+                for (String dependent : currentNode.getDependents()) {
+                    if (!visited.contains(dependent)) {
+                        visited.add(dependent);
+                        impacted.add(dependent);
+                        queue.add(dependent);
+                        log.debug("Added dependent: {} -> {}", current, dependent);
+                    }
                 }
             }
         }
 
+        log.info("Found {} impacted nodes for file: {}", impacted.size(), changedFile);
         return impacted;
     }
 
-    private String findNodeByPath(String filePath) {
-        // Simple mapping - in production, this would be more sophisticated
-        if (filePath.contains("User")) return "user-service";
-        if (filePath.contains("Order")) return "order-service";
-        if (filePath.contains("Auth")) return "auth-service";
-        return null;
+    private String findNodeByFileName(String fileName) {
+        // Map file patterns to node IDs
+        String lowerFileName = fileName.toLowerCase();
+
+        if (lowerFileName.contains("user") || lowerFileName.contains("profile")) {
+            return "user-service";
+        }
+        if (lowerFileName.contains("order") || lowerFileName.contains("purchase")) {
+            return "order-service";
+        }
+        if (lowerFileName.contains("auth") || lowerFileName.contains("login")) {
+            return "auth-service";
+        }
+        if (lowerFileName.contains("payment") || lowerFileName.contains("checkout")) {
+            return "payment-service";
+        }
+        if (lowerFileName.contains("api") && lowerFileName.contains("user")) {
+            return "api-user";
+        }
+        if (lowerFileName.contains("ui") && lowerFileName.contains("profile")) {
+            return "ui-user-profile";
+        }
+        if (lowerFileName.contains("ui") && lowerFileName.contains("order")) {
+            return "ui-order-list";
+        }
+
+        // Default to user service if no match
+        return "user-service";
     }
 
     public List<DependencyNode> getImpactedNodesDetailed(Set<String> impactedIds) {
@@ -257,16 +284,7 @@ public class DependencyGraphService {
         return result;
     }
 
-    private void saveGraph() {
-        try {
-            objectMapper.writeValue(new File("dependency-graph.json"), nodeDetails.values());
-            log.info("Saved dependency graph to file");
-        } catch (Exception e) {
-            log.error("Failed to save graph", e);
-        }
-    }
-
-    public Graph<String, DefaultEdge> getGraph() {
-        return dependencyGraph;
+    public Map<String, DependencyNode> getAllNodes() {
+        return nodeDetails;
     }
 }

@@ -12,6 +12,13 @@ github:
   token: ${GITHUB_TOKEN:your-github-token}  # Optional: Set your GitHub token for higher API limits
   webhook-secret: ${WEBHOOK_SECRET:your-webhook-secret}
 
+# Copilot/AI Configuration
+copilot:
+  use:
+    local: true  # Use local analysis (no API calls)
+  # Uncomment to try Copilot API (requires GitHub Copilot license)
+  # enabled: false
+
 openai:
   api:
     key: ${OPENAI_API_KEY:your-openai-key}  # Optional: Set your OpenAI API key for AI analysis

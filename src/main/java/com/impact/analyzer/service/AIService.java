@@ -1,5 +1,6 @@
 package com.impact.analyzer.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.impact.analyzer.model.ChangedFile;
 import com.impact.analyzer.model.DependencyNode;
@@ -21,186 +22,114 @@ import java.util.stream.Collectors;
 @Slf4j
 public class AIService {
 
-    @Value("${openai.api.key:}")
-    private String openAiKey;
+    @Value("${github.token:}")
+    private String githubToken;
 
-    @Value("${openai.use.fallback:true}")
-    private boolean useFallback;
+    @Value("${copilot.use.local:true}")
+    private boolean useLocalAnalysis;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ImpactReport analyzeImpact(List<ChangedFile> changedFiles,
                                       List<DependencyNode> impactedNodes) {
-        if (openAiKey == null || openAiKey.isEmpty() || useFallback) {
-            log.warn("OpenAI API key not configured or fallback enabled, using fallback analysis");
-            return generateFallbackAnalysis(changedFiles, impactedNodes);
+        // Use local analysis by default (no API calls)
+        if (useLocalAnalysis) {
+            log.info("Using local analysis (no API calls)");
+            return generateLocalAnalysis(changedFiles, impactedNodes);
         }
 
-        // Retry logic with exponential backoff
-        int maxRetries = 3;
-        int retryDelay = 1000; // Start with 1 second
-
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        // Optionally try GitHub Copilot API if configured
+        if (githubToken != null && !githubToken.isEmpty()) {
             try {
-                String prompt = buildPrompt(changedFiles, impactedNodes);
-                String aiResponse = callOpenAI(prompt);
-                return parseAIResponse(aiResponse, changedFiles, impactedNodes);
+                return analyzeWithCopilot(changedFiles, impactedNodes);
             } catch (Exception e) {
-                log.error("AI analysis failed (attempt {}/{}): {}", attempt, maxRetries, e.getMessage());
-
-                if (e.getMessage().contains("429")) {
-                    // Rate limit - increase delay and retry
-                    retryDelay *= 2; // Exponential backoff
-                    log.warn("Rate limited, waiting {}ms before retry", retryDelay);
-                    try {
-                        Thread.sleep(retryDelay);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                } else if (attempt == maxRetries) {
-                    log.error("All retries failed, using fallback analysis");
-                    return generateFallbackAnalysis(changedFiles, impactedNodes);
-                }
+                log.warn("Copilot analysis failed, using local analysis", e);
+                return generateLocalAnalysis(changedFiles, impactedNodes);
             }
         }
 
-        return generateFallbackAnalysis(changedFiles, impactedNodes);
+        return generateLocalAnalysis(changedFiles, impactedNodes);
     }
 
-    private String buildPrompt(List<ChangedFile> changedFiles, List<DependencyNode> impactedNodes) {
-        StringBuilder prompt = new StringBuilder();
-        prompt.append("You are an expert software architect analyzing a Pull Request.\n\n");
+    private ImpactReport analyzeWithCopilot(List<ChangedFile> changedFiles,
+                                            List<DependencyNode> impactedNodes) throws Exception {
+        log.info("Attempting to analyze with GitHub Copilot...");
 
-        prompt.append("CHANGED FILES:\n");
-        for (ChangedFile file : changedFiles) {
-            prompt.append(String.format("- %s (%s): +%d -%d\n",
-                    file.getFilename(), file.getStatus(), file.getAdditions(), file.getDeletions()));
-            if (file.getPatch() != null && file.getPatch().length() < 500) {
-                prompt.append("  Patch: ").append(file.getPatch()).append("\n");
-            }
-        }
+        // GitHub Copilot API endpoint (requires GitHub token with Copilot access)
+        String apiUrl = "https://api.github.com/copilot/completions";
 
-        prompt.append("\nIMPACTED COMPONENTS (based on dependency graph):\n");
-        for (DependencyNode node : impactedNodes) {
-            prompt.append(String.format("- %s (%s): %s\n",
-                    node.getName(), node.getType(), node.getPath()));
-        }
-
-        prompt.append("\nPlease analyze the impact and provide a JSON response with:\n");
-        prompt.append("{\n");
-        prompt.append("  \"summary\": {\n");
-        prompt.append("    \"riskLevel\": 1-5 (1=low, 5=critical),\n");
-        prompt.append("    \"riskDescription\": \"brief description\",\n");
-        prompt.append("    \"estimatedTestingHours\": number\n");
-        prompt.append("  },\n");
-        prompt.append("  \"impactedServices\": [{\"name\": \"\", \"impactType\": \"DIRECT/INDIRECT\", \"risk\": \"HIGH/MEDIUM/LOW\", \"reasons\": []}],\n");
-        prompt.append("  \"impactedApis\": [{\"endpoint\": \"\", \"method\": \"\", \"impactType\": \"\", \"impactedMethods\": []}],\n");
-        prompt.append("  \"impactedScreens\": [{\"name\": \"\", \"component\": \"\", \"impactReason\": \"\"}],\n");
-        prompt.append("  \"requiredTestCases\": [\"test1\", \"test2\"],\n");
-        prompt.append("  \"recommendations\": [\"rec1\", \"rec2\"]\n");
-        prompt.append("}\n");
-
-        return prompt.toString();
-    }
-
-    private String callOpenAI(String prompt) throws Exception {
-        URL url = new URL("https://api.openai.com/v1/chat/completions");
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        HttpURLConnection conn = (HttpURLConnection) new URL(apiUrl).openConnection();
         conn.setRequestMethod("POST");
         conn.setRequestProperty("Content-Type", "application/json");
-        conn.setRequestProperty("Authorization", "Bearer " + openAiKey);
+        conn.setRequestProperty("Authorization", "token " + githubToken);
+        conn.setRequestProperty("User-Agent", "PR-Impact-Analyzer");
         conn.setDoOutput(true);
-        conn.setConnectTimeout(30000); // 30 second timeout
-        conn.setReadTimeout(60000);    // 60 second read timeout
+        conn.setConnectTimeout(30000);
+        conn.setReadTimeout(60000);
+
+        String prompt = buildCopilotPrompt(changedFiles, impactedNodes);
 
         Map<String, Object> requestBody = new HashMap<>();
-        requestBody.put("model", "gpt-3.5-turbo");
-
-        List<Map<String, String>> messages = new ArrayList<>();
-        Map<String, String> userMessage = new HashMap<>();
-        userMessage.put("role", "user");
-        userMessage.put("content", prompt);
-        messages.add(userMessage);
-        requestBody.put("messages", messages);
-        requestBody.put("temperature", 0.3); // Lower temperature for more consistent results
-        requestBody.put("max_tokens", 1000);
+        requestBody.put("prompt", prompt);
+        requestBody.put("max_tokens", 500);
+        requestBody.put("temperature", 0.3);
 
         String jsonInput = objectMapper.writeValueAsString(requestBody);
 
         try (OutputStream os = conn.getOutputStream()) {
-            byte[] input = jsonInput.getBytes(StandardCharsets.UTF_8);
-            os.write(input, 0, input.length);
+            os.write(jsonInput.getBytes(StandardCharsets.UTF_8));
+            os.flush();
         }
 
         int responseCode = conn.getResponseCode();
-        if (responseCode != 200) {
-            // Read error response for better debugging
-            StringBuilder errorResponse = new StringBuilder();
+        if (responseCode == 200) {
+            StringBuilder response = new StringBuilder();
             try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(conn.getErrorStream(), StandardCharsets.UTF_8))) {
+                    new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = br.readLine()) != null) {
-                    errorResponse.append(line);
+                    response.append(line);
                 }
             }
-            throw new RuntimeException("OpenAI API returned " + responseCode + ": " + errorResponse);
-        }
 
-        StringBuilder response = new StringBuilder();
-        try (BufferedReader br = new BufferedReader(
-                new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-            String responseLine;
-            while ((responseLine = br.readLine()) != null) {
-                response.append(responseLine.trim());
-            }
-        }
-
-        Map<String, Object> responseMap = objectMapper.readValue(response.toString(), Map.class);
-        List<Map<String, Object>> choices = (List<Map<String, Object>>) responseMap.get("choices");
-        Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
-        String content = (String) message.get("content");
-
-        // Extract JSON from the response
-        int startJson = content.indexOf("{");
-        int endJson = content.lastIndexOf("}") + 1;
-        if (startJson >= 0 && endJson > startJson) {
-            return content.substring(startJson, endJson);
-        }
-
-        return content;
-    }
-
-    private ImpactReport parseAIResponse(String aiResponse,
-                                         List<ChangedFile> changedFiles,
-                                         List<DependencyNode> impactedNodes) {
-        try {
-            ImpactReport report = objectMapper.readValue(aiResponse, ImpactReport.class);
-            report.setPrNumber("PR-" + System.currentTimeMillis());
-            report.setPrTitle("Impact Analysis");
-            report.setConfidenceScore(0.85);
-            report.setAiAnalysis(aiResponse);
-
-            // Ensure lists are never null
-            if (report.getImpactedServices() == null) report.setImpactedServices(new ArrayList<>());
-            if (report.getImpactedApis() == null) report.setImpactedApis(new ArrayList<>());
-            if (report.getImpactedScreens() == null) report.setImpactedScreens(new ArrayList<>());
-            if (report.getRequiredTestCases() == null) report.setRequiredTestCases(new ArrayList<>());
-            if (report.getRecommendations() == null) report.setRecommendations(new ArrayList<>());
-
-            return report;
-        } catch (Exception e) {
-            log.error("Failed to parse AI response", e);
-            return generateFallbackAnalysis(changedFiles, impactedNodes);
+            JsonNode responseJson = objectMapper.readTree(response.toString());
+            String aiResponse = responseJson.get("choices").get(0).get("text").asText();
+            return parseAIResponse(aiResponse, changedFiles, impactedNodes);
+        } else {
+            log.warn("Copilot API returned {}, using local analysis", responseCode);
+            throw new RuntimeException("Copilot API error: " + responseCode);
         }
     }
 
-    private ImpactReport generateFallbackAnalysis(List<ChangedFile> changedFiles,
-                                                  List<DependencyNode> impactedNodes) {
+    private String buildCopilotPrompt(List<ChangedFile> changedFiles, List<DependencyNode> impactedNodes) {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Analyze the impact of these code changes and return a JSON response.\n\n");
+        prompt.append("Changed files:\n");
+        for (ChangedFile file : changedFiles) {
+            prompt.append(String.format("- %s: +%d -%d\n",
+                    file.getFilename(), file.getAdditions(), file.getDeletions()));
+        }
+
+        prompt.append("\nImpacted components:\n");
+        for (DependencyNode node : impactedNodes) {
+            prompt.append(String.format("- %s (%s)\n", node.getName(), node.getType()));
+        }
+
+        prompt.append("\nReturn JSON with: summary (riskLevel 1-5, riskDescription, estimatedTestingHours), ");
+        prompt.append("impactedServices, impactedApis, impactedScreens, requiredTestCases, recommendations\n");
+
+        return prompt.toString();
+    }
+
+    private ImpactReport generateLocalAnalysis(List<ChangedFile> changedFiles,
+                                               List<DependencyNode> impactedNodes) {
+        log.info("Generating local analysis for {} changed files, {} impacted nodes",
+                changedFiles.size(), impactedNodes.size());
+
         ImpactReport report = new ImpactReport();
-        report.setPrNumber("FALLBACK");
-        report.setPrTitle("Automated Impact Analysis");
-        report.setConfidenceScore(0.65);
+        report.setPrNumber("LOCAL");
+        report.setPrTitle("Local Impact Analysis");
+        report.setConfidenceScore(0.75);
 
         // Initialize all lists
         report.setImpactedServices(new ArrayList<>());
@@ -209,61 +138,158 @@ public class AIService {
         report.setRequiredTestCases(new ArrayList<>());
         report.setRecommendations(new ArrayList<>());
 
-        // Calculate risk based on changes
-        int totalChanges = changedFiles.stream().mapToInt(f -> f.getAdditions() + f.getDeletions()).sum();
-        int riskLevel = totalChanges > 500 ? 4 : (totalChanges > 100 ? 3 : 2);
+        // Calculate metrics
+        int totalAdditions = changedFiles.stream().mapToInt(ChangedFile::getAdditions).sum();
+        int totalDeletions = changedFiles.stream().mapToInt(ChangedFile::getDeletions).sum();
+        int totalChanges = totalAdditions + totalDeletions;
+
+        // Determine risk level
+        int riskLevel = 1;
+        String riskDescription = "Low risk - Minor changes detected";
+
+        if (totalChanges > 500) {
+            riskLevel = 5;
+            riskDescription = "Critical risk - Massive changes detected, requires extensive testing";
+        } else if (totalChanges > 200) {
+            riskLevel = 4;
+            riskDescription = "High risk - Significant changes, thorough review needed";
+        } else if (totalChanges > 50) {
+            riskLevel = 3;
+            riskDescription = "Medium risk - Moderate changes, standard testing required";
+        } else if (totalChanges > 10) {
+            riskLevel = 2;
+            riskDescription = "Low-medium risk - Some impact expected";
+        }
+
+        // Adjust risk based on impacted nodes
+        long serviceCount = impactedNodes.stream().filter(n -> "SERVICE".equals(n.getType())).count();
+        long apiCount = impactedNodes.stream().filter(n -> "API".equals(n.getType())).count();
+
+        if (serviceCount > 5 || apiCount > 10) {
+            riskLevel = Math.min(5, riskLevel + 1);
+            riskDescription = "High risk - Many services/APIs impacted";
+        } else if (serviceCount > 2 || apiCount > 5) {
+            riskLevel = Math.min(5, riskLevel + 1);
+        }
 
         ImpactReport.AnalysisSummary summary = new ImpactReport.AnalysisSummary();
         summary.setTotalChanges(changedFiles.size());
         summary.setRiskLevel(riskLevel);
-        summary.setRiskDescription(riskLevel > 3 ? "High risk - Major changes detected" : "Moderate risk - Review recommended");
+        summary.setRiskDescription(riskDescription);
         summary.setEstimatedTestingHours(riskLevel * 2);
         report.setSummary(summary);
 
-        // Identify impacted services
-        for (DependencyNode node : impactedNodes) {
-            if ("SERVICE".equals(node.getType())) {
-                ImpactReport.ImpactedService service = new ImpactReport.ImpactedService();
-                service.setName(node.getName());
-                service.setImpactType(changedFiles.stream().anyMatch(f -> f.getFilename().contains(node.getName())) ? "DIRECT" : "INDIRECT");
-                service.setRisk(riskLevel > 3 ? "HIGH" : "MEDIUM");
-                service.setReasons(Arrays.asList("File changed in dependency chain"));
-                report.getImpactedServices().add(service);
-            }
+        // Process impacted services
+        Map<String, List<DependencyNode>> nodesByType = impactedNodes.stream()
+                .collect(Collectors.groupingBy(DependencyNode::getType));
+
+        // Impacted Services
+        for (DependencyNode node : nodesByType.getOrDefault("SERVICE", new ArrayList<>())) {
+            ImpactReport.ImpactedService service = new ImpactReport.ImpactedService();
+            service.setName(node.getName());
+            boolean isDirect = changedFiles.stream()
+                    .anyMatch(f -> f.getFilename().toLowerCase().contains(node.getName().toLowerCase()));
+            service.setImpactType(isDirect ? "DIRECT" : "INDIRECT");
+            service.setRisk(riskLevel >= 4 ? "HIGH" : (riskLevel >= 3 ? "MEDIUM" : "LOW"));
+            service.setReasons(Arrays.asList(
+                    isDirect ? "File directly modified" : "Depends on changed component",
+                    "Affects " + (node.getDependents() != null ? node.getDependents().size() : 0) + " downstream components"
+            ));
+            report.getImpactedServices().add(service);
         }
 
-        // Identify impacted APIs
-        for (DependencyNode node : impactedNodes) {
-            if ("API".equals(node.getType())) {
-                ImpactReport.ImpactedAPI api = new ImpactReport.ImpactedAPI();
-                api.setEndpoint(node.getPath());
-                api.setMethod("REST");
-                api.setImpactType("INDIRECT");
-                api.setImpactedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE"));
-                report.getImpactedApis().add(api);
-            }
+        // Impacted APIs
+        for (DependencyNode node : nodesByType.getOrDefault("API", new ArrayList<>())) {
+            ImpactReport.ImpactedAPI api = new ImpactReport.ImpactedAPI();
+            api.setEndpoint(node.getPath());
+            api.setMethod("REST");
+            api.setImpactType("INDIRECT");
+            api.setImpactedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE"));
+            report.getImpactedApis().add(api);
         }
 
-        // Generate test cases
-        report.getRequiredTestCases().add("Unit testing for changed files");
-        report.getRequiredTestCases().add("Integration testing for impacted services");
+        // Impacted UI Screens
+        for (DependencyNode node : nodesByType.getOrDefault("UI_COMPONENT", new ArrayList<>())) {
+            ImpactReport.ImpactedScreen screen = new ImpactReport.ImpactedScreen();
+            screen.setName(node.getName());
+            screen.setComponent(node.getPath());
+            screen.setImpactReason("Depends on changed backend service");
+            report.getImpactedScreens().add(screen);
+        }
+
+        // Generate test cases based on risk level
+        report.getRequiredTestCases().add("✓ Unit tests for changed files (" + changedFiles.size() + " files)");
+        report.getRequiredTestCases().add("✓ Integration tests for impacted services (" + report.getImpactedServices().size() + " services)");
+
         if (!report.getImpactedApis().isEmpty()) {
-            report.getRequiredTestCases().add("API contract testing for " + report.getImpactedApis().size() + " endpoints");
-        }
-        if (report.getImpactedServices().stream().anyMatch(s -> "HIGH".equals(s.getRisk()))) {
-            report.getRequiredTestCases().add("Performance testing for critical paths");
-            report.getRequiredTestCases().add("Security testing for changed components");
+            report.getRequiredTestCases().add("✓ API contract testing for " + report.getImpactedApis().size() + " endpoints");
         }
 
-        // Recommendations
-        report.getRecommendations().add("Run comprehensive regression tests");
-        report.getRecommendations().add("Review changes with team members");
-        report.getRecommendations().add("Update API documentation if interfaces changed");
-        if (riskLevel > 3) {
-            report.getRecommendations().add("Consider breaking changes and versioning strategy");
-            report.getRecommendations().add("Perform staging deployment before production");
+        if (riskLevel >= 4) {
+            report.getRequiredTestCases().add("✓ Performance/Load testing for critical paths");
+            report.getRequiredTestCases().add("✓ Security testing for modified components");
+            report.getRequiredTestCases().add("✓ Regression testing for entire affected modules");
+        } else if (riskLevel >= 3) {
+            report.getRequiredTestCases().add("✓ Regression testing for impacted features");
+        }
+
+        if (totalAdditions > 100) {
+            report.getRequiredTestCases().add("✓ Code review focusing on new logic");
+        }
+
+        if (totalDeletions > 50) {
+            report.getRequiredTestCases().add("✓ Verify removed code doesn't break dependencies");
+        }
+
+        // Generate recommendations
+        report.getRecommendations().add("Run automated tests before merging");
+        report.getRecommendations().add("Request peer review for changes");
+
+        if (riskLevel >= 4) {
+            report.getRecommendations().add("⚠️  Consider deploying to staging environment first");
+            report.getRecommendations().add("⚠️  Coordinate with QA team for thorough testing");
+            report.getRecommendations().add("⚠️  Prepare rollback plan before production deployment");
+        } else if (riskLevel >= 3) {
+            report.getRecommendations().add("Deploy during low-traffic hours");
+            report.getRecommendations().add("Monitor metrics after deployment");
+        }
+
+        if (report.getImpactedServices().stream().anyMatch(s -> "DIRECT".equals(s.getImpactType()))) {
+            report.getRecommendations().add("Update service documentation if interfaces changed");
+        }
+
+        if (!report.getImpactedApis().isEmpty()) {
+            report.getRecommendations().add("Verify API versioning and backward compatibility");
         }
 
         return report;
+    }
+
+    private ImpactReport parseAIResponse(String aiResponse,
+                                         List<ChangedFile> changedFiles,
+                                         List<DependencyNode> impactedNodes) {
+        try {
+            // Try to extract JSON from response
+            int startJson = aiResponse.indexOf("{");
+            int endJson = aiResponse.lastIndexOf("}") + 1;
+            if (startJson >= 0 && endJson > startJson) {
+                String jsonStr = aiResponse.substring(startJson, endJson);
+                ImpactReport report = objectMapper.readValue(jsonStr, ImpactReport.class);
+
+                // Ensure lists are not null
+                if (report.getImpactedServices() == null) report.setImpactedServices(new ArrayList<>());
+                if (report.getImpactedApis() == null) report.setImpactedApis(new ArrayList<>());
+                if (report.getImpactedScreens() == null) report.setImpactedScreens(new ArrayList<>());
+                if (report.getRequiredTestCases() == null) report.setRequiredTestCases(new ArrayList<>());
+                if (report.getRecommendations() == null) report.setRecommendations(new ArrayList<>());
+
+                report.setConfidenceScore(0.85);
+                return report;
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse AI response, using local analysis", e);
+        }
+
+        return generateLocalAnalysis(changedFiles, impactedNodes);
     }
 }
