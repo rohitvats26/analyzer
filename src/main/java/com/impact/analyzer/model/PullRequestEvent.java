@@ -16,25 +16,11 @@ import java.util.Date;
 public class PullRequestEvent {
     private String action;
     private Long number;
-    private String repository;
+    private Repo repository;
     @JsonProperty("pull_request")
     private PullRequest pullRequest;
     private User sender;
 
-    public String getRepository() {
-        if (repository != null) {
-            return repository;
-        }
-        if (pullRequest != null && pullRequest.getHead() != null &&
-                pullRequest.getHead().getRepo() != null) {
-            return pullRequest.getHead().getRepo().getFullName();
-        }
-        if (pullRequest != null && pullRequest.getBase() != null &&
-                pullRequest.getBase().getRepo() != null) {
-            return pullRequest.getBase().getRepo().getFullName();
-        }
-        return null;
-    }
 
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -94,16 +80,60 @@ public class PullRequestEvent {
     }
 
     @Data
-    @JsonIgnoreProperties(ignoreUnknown = true)
     @NoArgsConstructor
     @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Repo {
         private Long id;
         private String name;
+
         @JsonProperty("full_name")
         private String fullName;
+
         private String url;
+
+        @JsonProperty("html_url")
+        private String htmlUrl;
+
         @JsonProperty("clone_url")
         private String cloneUrl;
+
+        private String description;
+        private boolean fork;
+
+        @JsonProperty("private")
+        private boolean isPrivate;
+
+        @JsonProperty("created_at")
+        private Date createdAt;
+
+        @JsonProperty("updated_at")
+        private Date updatedAt;
+
+        @JsonProperty("pushed_at")
+        private Date pushedAt;
+
+        @JsonProperty("stargazers_count")
+        private int stargazersCount;
+
+        @JsonProperty("watchers_count")
+        private int watchersCount;
+
+        @JsonProperty("forks_count")
+        private int forksCount;
+
+        @JsonProperty("open_issues_count")
+        private int openIssuesCount;
+
+        @JsonProperty("default_branch")
+        private String defaultBranch;
+
+        private User owner;
+
+        @JsonProperty("node_id")
+        private String nodeId;
+
+        @JsonProperty("size")
+        private int size;
     }
 }
