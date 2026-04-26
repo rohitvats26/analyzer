@@ -24,23 +24,48 @@ public class AIService {
     @Value("${openai.api.key:}")
     private String openAiKey;
 
+    @Value("${openai.use.fallback:true}")
+    private boolean useFallback;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ImpactReport analyzeImpact(List<ChangedFile> changedFiles,
                                       List<DependencyNode> impactedNodes) {
-        if (openAiKey == null || openAiKey.isEmpty()) {
-            log.warn("OpenAI API key not configured, using fallback analysis");
+        if (openAiKey == null || openAiKey.isEmpty() || useFallback) {
+            log.warn("OpenAI API key not configured or fallback enabled, using fallback analysis");
             return generateFallbackAnalysis(changedFiles, impactedNodes);
         }
 
-        try {
-            String prompt = buildPrompt(changedFiles, impactedNodes);
-            String aiResponse = callOpenAI(prompt);
-            return parseAIResponse(aiResponse, changedFiles, impactedNodes);
-        } catch (Exception e) {
-            log.error("AI analysis failed, using fallback", e);
-            return generateFallbackAnalysis(changedFiles, impactedNodes);
+        // Retry logic with exponential backoff
+        int maxRetries = 3;
+        int retryDelay = 1000; // Start with 1 second
+
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                String prompt = buildPrompt(changedFiles, impactedNodes);
+                String aiResponse = callOpenAI(prompt);
+                return parseAIResponse(aiResponse, changedFiles, impactedNodes);
+            } catch (Exception e) {
+                log.error("AI analysis failed (attempt {}/{}): {}", attempt, maxRetries, e.getMessage());
+
+                if (e.getMessage().contains("429")) {
+                    // Rate limit - increase delay and retry
+                    retryDelay *= 2; // Exponential backoff
+                    log.warn("Rate limited, waiting {}ms before retry", retryDelay);
+                    try {
+                        Thread.sleep(retryDelay);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                } else if (attempt == maxRetries) {
+                    log.error("All retries failed, using fallback analysis");
+                    return generateFallbackAnalysis(changedFiles, impactedNodes);
+                }
+            }
         }
+
+        return generateFallbackAnalysis(changedFiles, impactedNodes);
     }
 
     private String buildPrompt(List<ChangedFile> changedFiles, List<DependencyNode> impactedNodes) {
@@ -86,6 +111,8 @@ public class AIService {
         conn.setRequestProperty("Content-Type", "application/json");
         conn.setRequestProperty("Authorization", "Bearer " + openAiKey);
         conn.setDoOutput(true);
+        conn.setConnectTimeout(30000); // 30 second timeout
+        conn.setReadTimeout(60000);    // 60 second read timeout
 
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("model", "gpt-3.5-turbo");
@@ -96,7 +123,8 @@ public class AIService {
         userMessage.put("content", prompt);
         messages.add(userMessage);
         requestBody.put("messages", messages);
-        requestBody.put("temperature", 0.7);
+        requestBody.put("temperature", 0.3); // Lower temperature for more consistent results
+        requestBody.put("max_tokens", 1000);
 
         String jsonInput = objectMapper.writeValueAsString(requestBody);
 
@@ -107,7 +135,16 @@ public class AIService {
 
         int responseCode = conn.getResponseCode();
         if (responseCode != 200) {
-            throw new RuntimeException("OpenAI API returned " + responseCode);
+            // Read error response for better debugging
+            StringBuilder errorResponse = new StringBuilder();
+            try (BufferedReader br = new BufferedReader(
+                    new InputStreamReader(conn.getErrorStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    errorResponse.append(line);
+                }
+            }
+            throw new RuntimeException("OpenAI API returned " + responseCode + ": " + errorResponse);
         }
 
         StringBuilder response = new StringBuilder();
@@ -143,6 +180,14 @@ public class AIService {
             report.setPrTitle("Impact Analysis");
             report.setConfidenceScore(0.85);
             report.setAiAnalysis(aiResponse);
+
+            // Ensure lists are never null
+            if (report.getImpactedServices() == null) report.setImpactedServices(new ArrayList<>());
+            if (report.getImpactedApis() == null) report.setImpactedApis(new ArrayList<>());
+            if (report.getImpactedScreens() == null) report.setImpactedScreens(new ArrayList<>());
+            if (report.getRequiredTestCases() == null) report.setRequiredTestCases(new ArrayList<>());
+            if (report.getRecommendations() == null) report.setRecommendations(new ArrayList<>());
+
             return report;
         } catch (Exception e) {
             log.error("Failed to parse AI response", e);
@@ -157,6 +202,13 @@ public class AIService {
         report.setPrTitle("Automated Impact Analysis");
         report.setConfidenceScore(0.65);
 
+        // Initialize all lists
+        report.setImpactedServices(new ArrayList<>());
+        report.setImpactedApis(new ArrayList<>());
+        report.setImpactedScreens(new ArrayList<>());
+        report.setRequiredTestCases(new ArrayList<>());
+        report.setRecommendations(new ArrayList<>());
+
         // Calculate risk based on changes
         int totalChanges = changedFiles.stream().mapToInt(f -> f.getAdditions() + f.getDeletions()).sum();
         int riskLevel = totalChanges > 500 ? 4 : (totalChanges > 100 ? 3 : 2);
@@ -169,56 +221,48 @@ public class AIService {
         report.setSummary(summary);
 
         // Identify impacted services
-        List<ImpactReport.ImpactedService> services = impactedNodes.stream()
-                .filter(n -> "SERVICE".equals(n.getType()))
-                .map(node -> {
-                    ImpactReport.ImpactedService service = new ImpactReport.ImpactedService();
-                    service.setName(node.getName());
-                    service.setImpactType(changedFiles.stream().anyMatch(f -> f.getFilename().contains(node.getName())) ? "DIRECT" : "INDIRECT");
-                    service.setRisk(riskLevel > 3 ? "HIGH" : "MEDIUM");
-                    service.setReasons(Arrays.asList("File changed in dependency chain"));
-                    return service;
-                })
-                .collect(Collectors.toList());
-        report.setImpactedServices(services);
+        for (DependencyNode node : impactedNodes) {
+            if ("SERVICE".equals(node.getType())) {
+                ImpactReport.ImpactedService service = new ImpactReport.ImpactedService();
+                service.setName(node.getName());
+                service.setImpactType(changedFiles.stream().anyMatch(f -> f.getFilename().contains(node.getName())) ? "DIRECT" : "INDIRECT");
+                service.setRisk(riskLevel > 3 ? "HIGH" : "MEDIUM");
+                service.setReasons(Arrays.asList("File changed in dependency chain"));
+                report.getImpactedServices().add(service);
+            }
+        }
 
         // Identify impacted APIs
-        List<ImpactReport.ImpactedAPI> apis = impactedNodes.stream()
-                .filter(n -> "API".equals(n.getType()))
-                .map(node -> {
-                    ImpactReport.ImpactedAPI api = new ImpactReport.ImpactedAPI();
-                    api.setEndpoint(node.getPath());
-                    api.setMethod("REST");
-                    api.setImpactType("INDIRECT");
-                    api.setImpactedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE"));
-                    return api;
-                })
-                .collect(Collectors.toList());
-        report.setImpactedApis(apis);
+        for (DependencyNode node : impactedNodes) {
+            if ("API".equals(node.getType())) {
+                ImpactReport.ImpactedAPI api = new ImpactReport.ImpactedAPI();
+                api.setEndpoint(node.getPath());
+                api.setMethod("REST");
+                api.setImpactType("INDIRECT");
+                api.setImpactedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE"));
+                report.getImpactedApis().add(api);
+            }
+        }
 
         // Generate test cases
-        List<String> testCases = new ArrayList<>();
-        testCases.add("Unit testing for changed files");
-        testCases.add("Integration testing for impacted services");
-        if (!apis.isEmpty()) {
-            testCases.add("API contract testing for " + apis.size() + " endpoints");
+        report.getRequiredTestCases().add("Unit testing for changed files");
+        report.getRequiredTestCases().add("Integration testing for impacted services");
+        if (!report.getImpactedApis().isEmpty()) {
+            report.getRequiredTestCases().add("API contract testing for " + report.getImpactedApis().size() + " endpoints");
         }
-        if (services.stream().anyMatch(s -> "HIGH".equals(s.getRisk()))) {
-            testCases.add("Performance testing for critical paths");
-            testCases.add("Security testing for changed components");
+        if (report.getImpactedServices().stream().anyMatch(s -> "HIGH".equals(s.getRisk()))) {
+            report.getRequiredTestCases().add("Performance testing for critical paths");
+            report.getRequiredTestCases().add("Security testing for changed components");
         }
-        report.setRequiredTestCases(testCases);
 
         // Recommendations
-        List<String> recommendations = new ArrayList<>();
-        recommendations.add("Run comprehensive regression tests");
-        recommendations.add("Review changes with team members");
-        recommendations.add("Update API documentation if interfaces changed");
+        report.getRecommendations().add("Run comprehensive regression tests");
+        report.getRecommendations().add("Review changes with team members");
+        report.getRecommendations().add("Update API documentation if interfaces changed");
         if (riskLevel > 3) {
-            recommendations.add("Consider breaking changes and versioning strategy");
-            recommendations.add("Perform staging deployment before production");
+            report.getRecommendations().add("Consider breaking changes and versioning strategy");
+            report.getRecommendations().add("Perform staging deployment before production");
         }
-        report.setRecommendations(recommendations);
 
         return report;
     }
