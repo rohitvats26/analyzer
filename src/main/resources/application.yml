@@ -3,7 +3,7 @@ server:
 
 spring:
   application:
-    name: pr-impact-analyzer
+    name: impact-analyzer
 
 github:
   token: ${GITHUB_TOKEN:your-github-token}  # Optional: Set your GitHub token for higher API limits
