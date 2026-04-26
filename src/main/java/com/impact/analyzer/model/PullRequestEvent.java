@@ -1,11 +1,18 @@
 package com.impact.analyzer.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.NoArgsConstructor;
+
 import java.util.List;
 import java.util.Date;
 
 @Data
+@JsonIgnoreProperties(ignoreUnknown = true)
+@NoArgsConstructor
+@AllArgsConstructor
 public class PullRequestEvent {
     private String action;
     private Long number;
@@ -30,7 +37,11 @@ public class PullRequestEvent {
     }
 
     @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class PullRequest {
+        private Long id;
         private Integer number;
         private String title;
         private String body;
@@ -52,6 +63,9 @@ public class PullRequestEvent {
     }
 
     @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class User {
         private String login;
         @JsonProperty("avatar_url")
@@ -60,6 +74,9 @@ public class PullRequestEvent {
     }
 
     @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class Head {
         private String ref;
         private String sha;
@@ -67,6 +84,9 @@ public class PullRequestEvent {
     }
 
     @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class Base {
         private String ref;
         private String sha;
@@ -74,6 +94,9 @@ public class PullRequestEvent {
     }
 
     @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class Repo {
         private Long id;
         private String name;
