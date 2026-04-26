@@ -81,9 +81,5 @@ public class PullRequestEvent {
         private String url;
         @JsonProperty("clone_url")
         private String cloneUrl;
-
-        public String getFull_name() {
-            return fullName;
-        }
     }
 }
