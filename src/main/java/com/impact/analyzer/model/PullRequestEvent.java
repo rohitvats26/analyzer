@@ -8,6 +8,7 @@ import java.util.Date;
 @Data
 public class PullRequestEvent {
     private String action;
+    private Long number;
     private String repository;
     @JsonProperty("pull_request")
     private PullRequest pullRequest;
