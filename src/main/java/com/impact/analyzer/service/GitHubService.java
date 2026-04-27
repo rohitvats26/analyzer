@@ -1,5 +1,6 @@
 package com.impact.analyzer.service;
 import com.impact.analyzer.model.ImpactReport;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.kohsuke.github.*;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,6 +18,23 @@ public class GitHubService {
     private String githubToken;
 
     private GitHub github;
+
+    @PostConstruct
+    public void init() {
+        try {
+            if (githubToken != null && !githubToken.isEmpty() && !githubToken.equals("your-token-here")) {
+                github = new GitHubBuilder().withOAuthToken(githubToken).build();
+                // Test the connection
+                github.getRateLimit();
+                log.info("GitHub client initialized successfully. Rate limit: {}",
+                        github.getRateLimit().getRemaining());
+            } else {
+                log.warn("GitHub token not configured. PR comments will be disabled.");
+            }
+        } catch (IOException e) {
+            log.error("Failed to initialize GitHub client", e);
+        }
+    }
 
 
     public List<String> getChangedFiles(String repoFullName, int prNumber) throws IOException {
