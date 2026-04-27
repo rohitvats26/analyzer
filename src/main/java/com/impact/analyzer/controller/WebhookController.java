@@ -38,8 +38,6 @@ public class WebhookController {
     public String handlePRWebhook(@RequestBody String payload,
                                   @RequestHeader("X-GitHub-Event") String eventType) {
         log.info("Received GitHub webhook event: {}", eventType);
-        log.info("Payload: {}", payload);
-
         if (!"pull_request".equals(eventType)) {
             return "Ignored event: " + eventType;
         }
@@ -60,8 +58,14 @@ public class WebhookController {
             String branch = pr.getAsJsonObject("head").get("ref").getAsString();
 
             // Get changed files
-            List<String> changedFiles = getChangedFiles(cloneUrl, branch, headSha);
+            List<String> changedFiles = gitHubService.getChangedFiles(repoFullName, prNumber);
             log.info("PR #{} changed {} files", prNumber, changedFiles.size());
+
+            if (changedFiles.isEmpty()) {
+                gitHubService.postPRComment(repoFullName, prNumber,
+                        "No source code files changed in this PR. Impact analysis skipped.");
+                return "No files to analyze";
+            }
 
             // Analyze repository and build dependency graph
             DependencyGraph graph = dependencyAnalyzer.analyzeRepository(
@@ -84,15 +88,6 @@ public class WebhookController {
             log.error("Failed to process webhook", e);
             return "Error: " + e.getMessage();
         }
-    }
-
-    private List<String> getChangedFiles(String repoUrl, String branch, String commitSha) {
-        // In production, use GitHub API to get files changed in PR
-        // For demo, return sample files
-        return Arrays.asList(
-                "src/main/java/com/example/UserService.java",
-                "src/main/java/com/example/UserController.java"
-        );
     }
 
     private void captureRuntimeDependencies(DependencyGraph graph, ImpactReport report) {
