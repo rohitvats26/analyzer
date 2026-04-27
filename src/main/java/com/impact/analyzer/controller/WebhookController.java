@@ -43,6 +43,8 @@ public class WebhookController {
     @PostMapping("/github")
     public String handlePRWebhook(@RequestBody String payload,
                                   @RequestHeader("X-GitHub-Event") String eventType) {
+        log.info("Received GitHub webhook event: {}", eventType);
+        log.info("Payload: {}", payload);
 
         if (!"pull_request".equals(eventType)) {
             return "Ignored event: " + eventType;
