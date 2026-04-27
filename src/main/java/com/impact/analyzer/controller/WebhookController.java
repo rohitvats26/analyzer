@@ -56,7 +56,7 @@ public class WebhookController {
             String headSha = pr.getAsJsonObject("head").get("sha").getAsString();
             String cloneUrl = pr.getAsJsonObject("head").getAsJsonObject("repo").get("clone_url").getAsString();
             String branch = pr.getAsJsonObject("head").get("ref").getAsString();
-
+            log.info("Processing PR #{} in repo {} on branch {}", prNumber, repoFullName, branch);
             // Get changed files
             List<String> changedFiles = gitHubService.getChangedFiles(repoFullName, prNumber);
             log.info("PR #{} changed {} files", prNumber, changedFiles.size());
@@ -102,4 +102,6 @@ public class WebhookController {
         log.info("Captured {} runtime dependencies",
                 otelService.getRuntimeDependencies().size());
     }
+
+
 }
