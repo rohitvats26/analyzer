@@ -11,7 +11,6 @@ import com.impact.analyzer.service.GitHubService;
 import com.impact.analyzer.service.ImpactAnalyzer;
 import com.impact.analyzer.service.OpenTelemetryService;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
@@ -22,23 +21,20 @@ import java.util.*;
 @Slf4j
 public class WebhookController {
 
-    @Autowired
-    private DependencyAnalyzer dependencyAnalyzer;
-
-    @Autowired
-    private ImpactAnalyzer impactAnalyzer;
-
-    @Autowired
-    private GitHubService gitHubService;
-
-    @Autowired
-    private OpenTelemetryService otelService;
+    private final DependencyAnalyzer dependencyAnalyzer;
+    private final ImpactAnalyzer impactAnalyzer;
+    private final GitHubService gitHubService;
+    private final OpenTelemetryService otelService;
 
     @Value("${analyzer.workspace:/tmp/pr-analyzer}")
     private String workspacePath;
 
-    private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
-
+    public WebhookController(DependencyAnalyzer dependencyAnalyzer, ImpactAnalyzer impactAnalyzer, GitHubService gitHubService, OpenTelemetryService otelService) {
+        this.dependencyAnalyzer = dependencyAnalyzer;
+        this.impactAnalyzer = impactAnalyzer;
+        this.gitHubService = gitHubService;
+        this.otelService = otelService;
+    }
 
     @PostMapping("/github")
     public String handlePRWebhook(@RequestBody String payload,

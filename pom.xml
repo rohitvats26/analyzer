@@ -58,6 +58,16 @@
 			<groupId>org.kohsuke</groupId>
 			<artifactId>github-api</artifactId>
 			<version>1.318</version>
+			<exclusions>
+				<exclusion>
+					<groupId>com.fasterxml.jackson.core</groupId>
+					<artifactId>jackson-databind</artifactId>
+				</exclusion>
+				<exclusion>
+					<groupId>com.fasterxml.jackson.core</groupId>
+					<artifactId>jackson-core</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 
 		<!-- Language Parsers -->
