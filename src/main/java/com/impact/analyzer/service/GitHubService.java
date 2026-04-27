@@ -1,26 +1,10 @@
 package com.impact.analyzer.service;
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.impact.analyzer.model.ChangedFile;
 import com.impact.analyzer.model.ImpactReport;
-import com.impact.analyzer.model.PullRequestEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.kohsuke.github.*;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 
 @Service
