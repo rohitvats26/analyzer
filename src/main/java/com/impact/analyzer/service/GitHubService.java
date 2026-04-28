@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @Slf4j
@@ -41,32 +43,31 @@ public class GitHubService {
         List<String> changedFiles = new ArrayList<>();
 
         try {
-            GHRepository repository = github.getRepository(repoFullName);
-            GHPullRequest pullRequest = repository.getPullRequest(prNumber);
-            List<GHPullRequestFileDetail> files = pullRequest.listFiles().toList();
-
-            log.info("Retrieved {} changed files from GitHub API for PR #{}", files.size(), prNumber);
-
-            // Extract file paths
-            for (GHPullRequestFileDetail file : files) {
-                String filename = file.getFilename();
-                // Filter to only source code files we care about
-                if (isSourceCodeFile(filename)) {
-                    changedFiles.add(filename);
-                    log.debug("Changed file: {} (status: {})", filename, file.getStatus());
-                }
+            if (github == null) {
+                log.warn("GitHub client not initialized");
+                return changedFiles;
             }
 
-            // Also capture the diff content if needed for deeper analysis
-            for (GHPullRequestFileDetail file : files) {
-                if (isSourceCodeFile(file.getFilename())) {
-                    log.debug("File {} has {} additions and {} deletions",
-                            file.getFilename(), file.getAdditions(), file.getDeletions());
+            GHRepository repository = github.getRepository(repoFullName);
+            GHPullRequest pullRequest = repository.getPullRequest(prNumber);
 
-                    // You can also access the patch/diff content
+            // Get the diff between base and head
+            List<GHPullRequestFileDetail> files = pullRequest.listFiles().toList();
+
+            for (GHPullRequestFileDetail file : files) {
+                String filename = file.getFilename();
+                String status = file.getStatus(); // added, modified, removed, renamed
+
+                if (isSourceCodeFile(filename)) {
+                    changedFiles.add(filename);
+                    log.debug("Changed file: {} (status: {}, changes: +{}/-{})",
+                            filename, status, file.getAdditions(), file.getDeletions());
+
+                    // Get the actual diff/patch for detailed analysis
                     String patch = file.getPatch();
-                    if (patch != null && !patch.isEmpty()) {
-                        log.debug("Patch preview: {}", patch.substring(0, Math.min(200, patch.length())));
+                    if (patch != null) {
+                        // Parse patch to understand exactly what changed
+                        parsePatchForDetails(filename, patch);
                     }
                 }
             }
@@ -100,6 +101,33 @@ public class GitHubService {
         } catch (IOException e) {
             log.error("Failed to post PR comment", e);
         }
+    }
+
+    private void parsePatchForDetails(String filename, String patch) {
+        // Parse the unified diff format to understand line-by-line changes
+        String[] lines = patch.split("\n");
+        int addedLines = 0;
+        int removedLines = 0;
+        List<Integer> changedLineNumbers = new ArrayList<>();
+
+        for (String line : lines) {
+            if (line.startsWith("+") && !line.startsWith("+++")) {
+                addedLines++;
+            } else if (line.startsWith("-") && !line.startsWith("---")) {
+                removedLines++;
+            } else if (line.startsWith("@")) {
+                // Parse hunk header to get line numbers
+                Pattern hunkPattern = Pattern.compile("@@ -(\\d+),?\\d* \\+(\\d+),?\\d* @@");
+                Matcher matcher = hunkPattern.matcher(line);
+                if (matcher.find()) {
+                    changedLineNumbers.add(Integer.parseInt(matcher.group(1)));
+                    changedLineNumbers.add(Integer.parseInt(matcher.group(2)));
+                }
+            }
+        }
+
+        log.debug("Patch analysis for {}: +{} -{} lines changed at positions {}",
+                filename, addedLines, removedLines, changedLineNumbers);
     }
 
     private void addRiskLabel(GHPullRequest pr, ImpactReport report) throws IOException {
