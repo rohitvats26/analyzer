@@ -198,9 +198,9 @@ public class DependencyAnalyzer {
                 // Try to resolve the called method's class
                 Optional<Expression> scope = call.getScope();
                 if (scope.isPresent()) {
-                    String scopeType = scope.get().calculateResolvedType().describe();
-                    if (isProjectClass(scopeType)) {
-                        graph.addDependency(methodSignature, scopeType, "CALL", "method_invocation");
+                    String scopeName = scope.get().toString();
+                    if (scope.get().isNameExpr() && isProjectClass(scopeName)) {
+                        graph.addDependency(methodSignature, scopeName, "CALL", "method_invocation");
                     }
                 }
             });

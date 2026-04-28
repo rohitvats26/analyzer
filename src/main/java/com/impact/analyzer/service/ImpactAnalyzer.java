@@ -54,7 +54,9 @@ public class ImpactAnalyzer {
     private Set<String> findNodesByFile(DependencyGraph graph, String filePath) {
         Set<String> nodes = new HashSet<>();
         for (Map.Entry<String, NodeMetadata> entry : graph.getMetadata().entrySet()) {
-            if (entry.getValue().getFilePath().contains(filePath)) {
+            NodeMetadata metadata = entry.getValue();
+            String nodeFilePath = metadata != null ? metadata.getFilePath() : null;
+            if (nodeFilePath != null && filePath != null && nodeFilePath.contains(filePath)) {
                 nodes.add(entry.getKey());
             }
         }
