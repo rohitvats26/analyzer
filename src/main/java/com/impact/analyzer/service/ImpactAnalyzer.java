@@ -52,16 +52,36 @@ public class ImpactAnalyzer {
     }
     
     private Set<String> findNodesByFile(DependencyGraph graph, String filePath) {
-        Set<String> nodes = new HashSet<>();
-        for (Map.Entry<String, NodeMetadata> entry : graph.getMetadata().entrySet()) {
-            NodeMetadata metadata = entry.getValue();
-            String nodeFilePath = metadata != null ? metadata.getFilePath() : null;
-            if (nodeFilePath != null && filePath != null && nodeFilePath.contains(filePath)) {
+    Set<String> nodes = new HashSet<>();
+
+    // Normalize input filePath to use forward slashes and extract filename
+    String normalizedInputPath = filePath.replace("\\", "/");
+    String inputFileName = normalizedInputPath.substring(normalizedInputPath.lastIndexOf('/') + 1);
+
+    for (Map.Entry<String, NodeMetadata> entry : graph.getMetadata().entrySet()) {
+        NodeMetadata metadata = entry.getValue();
+        String nodeFilePath = metadata != null ? metadata.getFilePath() : null;
+
+        if (nodeFilePath != null) {
+            // Normalize nodeFilePath: convert backslashes to forward slashes
+            String normalizedNodePath = nodeFilePath.replace("\\", "/");
+
+            // Strip timestamp prefix (e.g., "1777358763725/src/main/...")
+            String cleanNodePath = normalizedNodePath;
+            int srcIndex = normalizedNodePath.indexOf("src/");
+            if (srcIndex > 0) {
+                cleanNodePath = normalizedNodePath.substring(srcIndex);
+            }
+
+            // Match if cleaned path ends with or contains the input path
+            if (cleanNodePath.contains(normalizedInputPath) ||
+                cleanNodePath.endsWith(inputFileName)) {
                 nodes.add(entry.getKey());
             }
         }
-        return nodes;
     }
+    return nodes;
+}
     
     private void categorizeImpact(String node, NodeMetadata metadata, ImpactReport report) {
         switch (metadata.getType().toUpperCase()) {
