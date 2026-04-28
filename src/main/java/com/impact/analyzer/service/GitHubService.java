@@ -22,7 +22,7 @@ public class GitHubService {
     @PostConstruct
     public void init() {
         try {
-            if (githubToken != null && !githubToken.isEmpty() && !githubToken.equals("your-token-here")) {
+            if (githubToken != null && !githubToken.isEmpty()) {
                 github = new GitHubBuilder().withOAuthToken(githubToken).build();
                 // Test the connection
                 github.getRateLimit();

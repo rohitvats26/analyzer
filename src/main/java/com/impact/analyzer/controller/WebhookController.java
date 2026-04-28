@@ -38,6 +38,7 @@ public class WebhookController {
     public String handlePRWebhook(@RequestBody String payload,
                                   @RequestHeader("X-GitHub-Event") String eventType) {
         log.info("Received GitHub webhook event: {}", eventType);
+        log.info("Payload: {}", payload);
         if (!"pull_request".equals(eventType)) {
             return "Ignored event: " + eventType;
         }
@@ -101,6 +102,16 @@ public class WebhookController {
 
         log.info("Captured {} runtime dependencies",
                 otelService.getRuntimeDependencies().size());
+    }
+
+    @GetMapping("/prChanges")
+    public List<String> getPRChanges(@RequestParam String repoFullName, @RequestParam int prNumber) {
+        try {
+            return gitHubService.getChangedFiles(repoFullName, prNumber);
+        } catch (Exception e) {
+            log.error("Failed to get PR changes", e);
+            return Collections.emptyList();
+        }
     }
 
 
